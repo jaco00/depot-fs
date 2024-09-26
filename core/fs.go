@@ -254,6 +254,31 @@ func MakeFileSystem(groupNum, blocksInGroup uint32, root, pattern, tpl string, s
 	return &fs, nil
 }
 
+// Close closes all open data files associated with the file system and ensures
+// that any buffered data is written to disk by calling Sync. If any Sync operation
+// fails, it logs a warning and returns the first encountered error. After closing,
+// the file references and statuses are reset to avoid further access.
+//
+// Returns:
+// error: If any Sync operation fails, it returns the corresponding error.
+// Otherwise, it returns nil if all files are successfully synced and closed.
+func (f *FileSystem) Close() error {
+	var err error = nil
+	for i := 0; i < int(f.Smeta.TotalGroups); i++ {
+		v := &f.device.volumes[i]
+		if v.Status != 0 && v.file != nil {
+			if e := v.file.Sync(); e != nil {
+				logrus.Warnf("Sync data file [%d:%s] failed :%v", i, v.Fn, e)
+				err = e
+			}
+			v.file.Close()
+			v.file = nil
+			v.Status = 0
+		}
+	}
+	return err
+}
+
 func (f *FileSystem) GetVolumeInfo(idx int) *Volume {
 	if idx < 0 || idx >= int(f.Smeta.TotalGroups) {
 		return nil
@@ -377,6 +402,9 @@ func (fs *FileSystem) syncInode(p uint32, node *Inode) error {
 	if err := binary.Write(fs.device.volumes[group-1].file, binary.LittleEndian, node); err != nil {
 		return err
 	}
+	if err := fs.device.volumes[group-1].file.Sync(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -408,22 +436,13 @@ func (fs *FileSystem) syncBlockAlloc(idx uint32, blks []uint32) error {
 	}
 	segs, _ := mergeSeg(blks)
 	for _, s := range segs {
-		//data := fs.blockGroups[idx].blockBitmap[s.offset : s.offset+s.length]
 		data := fs.blockGroups[idx].blockBitmap.GetData(s.offset, s.length)
 		fs.device.volumes[idx].file.WriteAt(data, int64(s.offset)+BlockBitmapOffset)
+		if err := fs.device.volumes[idx].file.Sync(); err != nil {
+			return err
+		}
 	}
 	return nil
-}
-
-func (fs *FileSystem) allocOneBlock() (uint32, error) {
-	blks, _, err := fs.allocBlocks(1, 1, false)
-	if err != nil {
-		return 0, err
-	}
-	if len(blks) == 0 {
-		return 0, errors.New("alloc block failed")
-	}
-	return blks[0], nil
 }
 
 func (fs *FileSystem) allocBlocks(numBlocks int, hlimit int, bigAlloc bool) ([]uint32, int, error) {
@@ -880,14 +899,14 @@ func (fs *FileSystem) CreateFile(name string, meta []byte) (*Vfile, string, erro
 
 	inode.MetaSize = uint16(len(mbuff))
 	inode.Blocks = 1
-	n, err := fs.allocOneBlock()
+	blks, _, err := fs.allocBlocks(1, 1, false)
 	if err != nil {
 		return nil, uid, err
 	}
-	if _, _, err := fs.writeBlock(n, mbuff, 0); err != nil {
+	if _, _, err := fs.writeBlock(blks[0], mbuff, 0); err != nil {
 		return nil, uid, err
 	}
-	inode.DirectPointers[0] = n
+	inode.DirectPointers[0] = blks[0]
 	vf.Inode = &inode
 	vf.offset.blkRemOffset = len(mbuff)
 	if err := vf.fs.syncInode(vf.Inodeptr, vf.Inode); err != nil {
@@ -969,6 +988,16 @@ type Vfile struct {
 	Inodeptr uint32 //todo rename Inodeptr to InodeId
 	Inode    *Inode
 	offset   VfileOffset
+	vols     []uint32
+}
+
+func (vf *Vfile) allocBlocks(numBlocks int, hlimit int, bigAlloc bool) ([]uint32, int, error) {
+	blks, n, err := vf.fs.allocBlocks(numBlocks, hlimit, bigAlloc)
+	for _, v := range blks {
+		_, group, _ := EntAddr(v).GetAddr()
+		AddUnique(&vf.vols, group)
+	}
+	return blks, n, err
 }
 
 func (vf *Vfile) readFromIndirect(blockptr uint32, blockIndex uint32, data []byte, depth int) (int, error) {
@@ -1241,11 +1270,10 @@ func (vf *Vfile) Read(data []byte) (int, error) {
 // Returns:
 // - int: The number of bytes successfully written to the file.
 // - error: Any error that occurred during the write operation. If successful, error will be nil.
-func (vf *Vfile) Write(data []byte) (int, error) {
+func (vf *Vfile) Write(data []byte) (totalWtn int, err error) {
 	if vf.Inode == nil {
 		return 0, errors.New("Invalid inode")
 	}
-	totalWtn := 0
 	for vf.offset.blockIdx < DirectBlocks { //overwrite
 		if vf.Inode.DirectPointers[vf.offset.blockIdx] != 0 {
 			wtn, broff, err := vf.fs.writeBlock(vf.Inode.DirectPointers[vf.offset.blockIdx], data, vf.offset.blkRemOffset)
@@ -1265,7 +1293,7 @@ func (vf *Vfile) Write(data []byte) (int, error) {
 			}
 		} else {
 			allocNum := vf.aliginBlock(len(data))
-			nb, batch, err := vf.fs.allocBlocks(allocNum, int(DirectBlocks-vf.offset.blockIdx), true)
+			nb, batch, err := vf.allocBlocks(allocNum, int(DirectBlocks-vf.offset.blockIdx), true)
 			if err != nil {
 				return totalWtn, err
 			}
@@ -1319,6 +1347,23 @@ func (vf *Vfile) Write(data []byte) (int, error) {
 	}
 }
 
+// Sync flushes any in-memory data related to the current file to the storage device.
+// This ensures that all buffered writes are committed to disk, making the data persistent.
+// It is typically called after a series of write operations to ensure data integrity.
+// If the system experiences a failure after calling Sync, the data is guaranteed to be written.
+// Returns an error if the synchronization fails.
+func (vf *Vfile) Sync() error {
+	for _, g := range vf.vols {
+		if g >= 1 && g <= vf.fs.Smeta.TotalGroups {
+			if err := vf.fs.device.volumes[g-1].file.Sync(); err != nil {
+				return err
+			}
+		}
+	}
+	vf.vols = nil
+	return nil
+}
+
 func (vf *Vfile) writeIndirectBlocks(blockIndex uint32, data []byte) (int, error) {
 	levels := []struct {
 		blkptr    *uint32
@@ -1331,15 +1376,15 @@ func (vf *Vfile) writeIndirectBlocks(blockIndex uint32, data []byte) (int, error
 	for _, level := range levels {
 		if blockIndex < uint32(pow(BlockPointers, level.indirects)) {
 			if *level.blkptr == 0 {
-				nb, err := vf.fs.allocOneBlock()
+				nb, _, err := vf.fs.allocBlocks(1, 1, false)
 				if err != nil {
 					return 0, err
 				}
-				err = vf.fs.writePointerWithCache(nb, make([]uint32, BlockPointers), 0, level.indirects)
+				err = vf.fs.writePointerWithCache(nb[0], make([]uint32, BlockPointers), 0, level.indirects)
 				if err != nil {
 					return 0, err
 				}
-				*(level.blkptr) = nb
+				*(level.blkptr) = nb[0]
 				if err := vf.fs.syncInode(vf.Inodeptr, vf.Inode); err != nil {
 					return 0, err
 				}
@@ -1357,7 +1402,7 @@ func (vf *Vfile) batchWriteNewBlk(blockptr uint32, blockIndex uint32, data []byt
 	totalWtn := 0
 	batchLimit := BlockPointers - int(blockIndex)
 	allocNum := vf.aliginBlock(len(data))
-	blks, _, err := vf.fs.allocBlocks(allocNum, batchLimit, true)
+	blks, _, err := vf.allocBlocks(allocNum, batchLimit, true)
 	if err != nil {
 		return totalWtn, err
 	}
@@ -1420,17 +1465,17 @@ func (vf *Vfile) writeToIndirect(blockptr uint32, blockIndex uint32, data []byte
 		return 0, err
 	}
 	if blockptrs[0] == 0 {
-		nb, err := vf.fs.allocOneBlock()
+		nb, _, err := vf.fs.allocBlocks(1, 1, false)
 		if err != nil {
 			return 0, err
 		}
 
-		err = vf.fs.writePointerWithCache(nb, make([]uint32, BlockPointers), 0, depth-1)
+		err = vf.fs.writePointerWithCache(nb[0], make([]uint32, BlockPointers), 0, depth-1)
 		if err != nil {
 			return 0, err
 		}
 
-		blockptrs[0] = nb
+		blockptrs[0] = nb[0]
 		err = vf.fs.writePointerWithCache(blockptr, blockptrs, int(indirectIndex), depth)
 		if err != nil {
 			return 0, err

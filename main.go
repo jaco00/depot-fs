@@ -17,7 +17,7 @@ var (
 	fromDir       = flag.String("i", "", "Source directory to copy all files into the current Depot FS")
 	toDir         = flag.String("o", "", "Destination directory to copy files to")
 	dataDir       = flag.String("d", "./data", "Data file dir")
-	fillLargeFile = flag.Int("f", 0, "Generate a large file (size in GB) with random data for performance testing")
+	fillLargeFile = flag.Int("f", 0, "Generate a large file (size in MB) with random data for performance testing")
 	eraseAll      = flag.Bool("X", false, "Delete all data")
 	delFile       = flag.String("x", "", "Delete file by uid")
 	readFile      = flag.String("r", "", "Read file for performance testing")
@@ -267,18 +267,23 @@ func batchAddFiles(fs *core.FileSystem, n int) error {
 
 func testingLargeFile(fs *core.FileSystem, size int64) error {
 	var batchLimit int64 = 50 * 1024 * 1024
-	var totalSize int64 = size * 1024 * 1024 * 1024
+	var totalSize int64 = size * 1024 * 1024
 	rdp, err := core.NewRandomDataProvider(int64(batchLimit), int64(totalSize), false, true)
 	if err != nil {
 		return err
 	}
 
-	key, wtn, crc1, _, err := core.WriteFile(fs, rdp, "test.file", nil, true)
+	key, wtn, crc1, vf, err := core.WriteFile(fs, rdp, "test.file", nil, true)
 	if err != nil {
 		fmt.Printf("test size:%d, write file failed :%s\n", totalSize, err)
 		return err
 	}
 	fmt.Printf("total write: %d bytes\n", wtn)
+	n := time.Now()
+	if err := vf.Sync(); err != nil {
+		return err
+	}
+	fmt.Printf("sync cost %s\n", time.Since(n))
 
 	dc, err := core.NewNullDataConsumer(true)
 	if err != nil {

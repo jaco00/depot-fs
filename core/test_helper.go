@@ -251,7 +251,7 @@ func WriteFile(fs *FileSystem, dp DataProvider, name string, meta []byte, echo b
 	var wtn int64 = 0
 	f, key, err := fs.CreateFile(name, meta)
 	if err != nil {
-		fmt.Printf("open file err:%s\n", err)
+		fmt.Printf("Create file err:%s\n", err)
 		return "", 0, 0, nil, err
 	}
 	start := time.Now()
