@@ -1,7 +1,6 @@
 package main
 
 import (
-	"depotFS/core"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jaco00/depot-fs/core"
 
 	"github.com/sirupsen/logrus"
 )

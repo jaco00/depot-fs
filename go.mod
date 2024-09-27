@@ -1,4 +1,4 @@
-module depotFS
+module github.com/jaco00/depot-fs
 
 go 1.21.6
 
