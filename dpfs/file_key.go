@@ -1,5 +1,5 @@
 /*
- fmt.go
+ file_key.go
 
  GNU GENERAL PUBLIC LICENSE
  Version 3, 29 June 2007
@@ -18,28 +18,40 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core
+package dpfs
 
-import "fmt"
+import (
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
+	"fmt"
+)
 
-func FormatBytes(bytes int64) string {
-	const (
-		KB int64 = 1024
-		MB       = KB * 1024
-		GB       = MB * 1024
-		TB       = GB * 1024
-	)
+type FileKey struct {
+	Shard    uint16
+	Inodeptr uint32
+	Seq      uint32
+	Stamp    uint32
+}
 
-	switch {
-	case bytes >= TB:
-		return fmt.Sprintf("%.2f TB", float64(bytes)/float64(TB))
-	case bytes >= GB:
-		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
-	case bytes >= MB:
-		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
-	case bytes >= KB:
-		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
-	default:
-		return fmt.Sprintf("%d", bytes)
+const keyLength = 28
+
+func (k *FileKey) ToString() string {
+	return fmt.Sprintf("%04x%08x%08x%08x", k.Shard, k.Inodeptr, k.Seq, k.Stamp)
+}
+
+func (k *FileKey) ParseKey(key string) error {
+	if len(key) != 28 {
+		return errors.New("invalid key length")
 	}
+	bytes, err := hex.DecodeString(string(key))
+	if err != nil {
+		return err
+	}
+	k.Shard = binary.BigEndian.Uint16(bytes[:2])
+	k.Inodeptr = binary.BigEndian.Uint32(bytes[2:6])
+	k.Seq = binary.BigEndian.Uint32(bytes[6:10])
+	k.Stamp = binary.BigEndian.Uint32(bytes[10:14])
+
+	return nil
 }

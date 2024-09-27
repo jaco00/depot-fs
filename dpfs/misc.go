@@ -1,5 +1,5 @@
 /*
- ent.go
+ misc.go
 
  GNU GENERAL PUBLIC LICENSE
  Version 3, 29 June 2007
@@ -18,27 +18,14 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core
+package dpfs
 
-type EntAddr uint32
-
-func (b EntAddr) IsBigBlock() uint32 {
-	return (uint32(b) & 0x80000000) >> 31
-}
-
-// return idx,group,isbig
-func (b EntAddr) GetAddr() (uint32, uint32, uint32) {
-	idx := uint32(b) & 0x000FFFFF
-	b = b >> 20
-	group := uint32(b & 0x7FF)
-	return idx, group, uint32(b >> 11)
-	//return (uint32(b) & 0x80000000) >> 31, (uint32(b) & 0x7FF00000) >> 20, pos
-}
-
-func MakeEntAddr(idx, group uint32, isBigBlock bool) uint32 {
-	addr := group<<20 | idx
-	if isBigBlock {
-		addr = addr | 0x80000000
+func AddUnique(array *[]uint32, newElem uint32) {
+	v := *array
+	for i := len(v) - 1; i >= 0; i-- {
+		if v[i] == newElem {
+			return
+		}
 	}
-	return addr
+	*array = append(v, newElem)
 }

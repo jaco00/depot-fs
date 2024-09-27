@@ -18,14 +18,15 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core_test
+package dpfs_test
 
 import (
-	"depotFS/core"
 	"errors"
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/jaco00/depot-fs/dpfs"
 )
 
 func TestSeekWrite(t *testing.T) {
@@ -35,7 +36,7 @@ func TestSeekWrite(t *testing.T) {
 	defer os.RemoveAll(testDir)
 
 	var group uint32 = 32
-	fs, err := core.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
+	fs, err := dpfs.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
 	if err != nil {
 		t.Fatalf("Failed to create file system: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestSeekWrite(t *testing.T) {
 	}
 }
 
-func initFile(fs *core.FileSystem, fileSize int64) (*core.Vfile, string, error) {
+func initFile(fs *dpfs.FileSystem, fileSize int64) (*dpfs.Vfile, string, error) {
 	fn := "test.io"
 	meta := make([]byte, 10)
 	f, key, err := fs.CreateFile(fn, meta)
@@ -80,7 +81,7 @@ func initFile(fs *core.FileSystem, fileSize int64) (*core.Vfile, string, error) 
 	return f, key, nil
 }
 
-func seekAndAppend(f *core.Vfile, pos int64, writeLen int64) error {
+func seekAndAppend(f *dpfs.Vfile, pos int64, writeLen int64) error {
 	_, err := f.SeekPos(pos)
 	if err != nil {
 		fmt.Printf("Seek failed: %s\n", err)
@@ -102,7 +103,7 @@ func seekAndAppend(f *core.Vfile, pos int64, writeLen int64) error {
 	return nil
 }
 
-func checkFile(fs *core.FileSystem, key string, fileSize int64, pos int64, writeLen int64) error {
+func checkFile(fs *dpfs.FileSystem, key string, fileSize int64, pos int64, writeLen int64) error {
 	f2, err := fs.OpenFile(key)
 	if err != nil {
 		fmt.Printf("Open file failed:%s\n", err)
@@ -139,7 +140,7 @@ func checkFile(fs *core.FileSystem, key string, fileSize int64, pos int64, write
 	return nil
 }
 
-func doSeekAndWrite(fs *core.FileSystem, fileSize int64, pos int64, writeLen int64) error {
+func doSeekAndWrite(fs *dpfs.FileSystem, fileSize int64, pos int64, writeLen int64) error {
 	f, key, err := initFile(fs, fileSize)
 	if err != nil {
 		return err

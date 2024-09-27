@@ -18,14 +18,15 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core_test
+package dpfs_test
 
 import (
-	"depotFS/core"
 	"errors"
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/jaco00/depot-fs/dpfs"
 )
 
 var (
@@ -34,12 +35,12 @@ var (
 	metaSize = 32
 )
 
-func doSeek(t *testing.T, fs *core.FileSystem, totalSize int64, batchLimit int64, pos int64) error {
-	rdp, err := core.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
+func doSeek(t *testing.T, fs *dpfs.FileSystem, totalSize int64, batchLimit int64, pos int64) error {
+	rdp, err := dpfs.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
 	if err != nil {
 		return err
 	}
-	key, _, _, _, err := core.WriteFile(fs, rdp, fn, meta, false)
+	key, _, _, _, err := dpfs.WriteFile(fs, rdp, fn, meta, false)
 	if err != nil {
 		t.Errorf("test size:%d, write file failed :%s", totalSize, err)
 		return err
@@ -89,7 +90,7 @@ func TestSeekToPos(t *testing.T) {
 	defer os.RemoveAll(testDir)
 
 	var group uint32 = 32
-	fs, err := core.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
+	fs, err := dpfs.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
 	if err != nil {
 		t.Fatalf("Failed to create file system: %v", err)
 	}

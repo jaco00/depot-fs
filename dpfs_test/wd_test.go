@@ -18,15 +18,15 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core_test
+package dpfs_test
 
 import (
-	"depotFS/core"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jaco00/depot-fs/dpfs"
 	"github.com/sirupsen/logrus"
 )
 
@@ -36,7 +36,7 @@ func TestWD(t *testing.T) {
 	}
 	defer os.RemoveAll(testDir)
 
-	fs, err := core.MakeFileSystem(core.MaxBlockGroupNum, core.DefaultBlocksInGroup, testDir, "", "", 0, true)
+	fs, err := dpfs.MakeFileSystem(dpfs.MaxBlockGroupNum, dpfs.DefaultBlocksInGroup, testDir, "", "", 0, true)
 	if err != nil {
 		t.Fatalf("Failed to create file system: %v", err)
 	}
@@ -70,15 +70,15 @@ func TestWD(t *testing.T) {
 	}
 }
 
-func doWD(t *testing.T, fs *core.FileSystem, totalSize int64, batchLimit int, data []byte) error {
+func doWD(t *testing.T, fs *dpfs.FileSystem, totalSize int64, batchLimit int, data []byte) error {
 	start := time.Now()
 	_, fb := fs.StatBlocks(-1)
 	_, fi := fs.StatInodes(-1)
-	rdp, err := core.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
+	rdp, err := dpfs.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
 	if err != nil {
 		return err
 	}
-	key, wtn, _, _, err := core.WriteFile(fs, rdp, "test.file", nil, false)
+	key, wtn, _, _, err := dpfs.WriteFile(fs, rdp, "test.file", nil, false)
 
 	duration1 := time.Since(start)
 	if err != nil {

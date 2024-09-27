@@ -18,18 +18,18 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core_test
+package dpfs_test
 
 import (
 	"bytes"
 	"crypto/rand"
-	"depotFS/core"
 	"fmt"
 	mrand "math/rand"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jaco00/depot-fs/dpfs"
 	"github.com/sirupsen/logrus"
 )
 
@@ -58,27 +58,27 @@ func randomBytes() []byte {
 	return b
 }
 
-func doRW(t *testing.T, fs *core.FileSystem, totalSize int64, batchLimit int) error {
+func doRW(t *testing.T, fs *dpfs.FileSystem, totalSize int64, batchLimit int) error {
 	start := time.Now()
-	rdp, err := core.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
+	rdp, err := dpfs.NewRandomDataProvider(int64(batchLimit), totalSize, true, true)
 	if err != nil {
 		return err
 	}
 	fn := randomFileName()
 	meta := randomBytes()
-	inodeptr, wtn, crc1, _, err := core.WriteFile(fs, rdp, fn, meta, false)
+	inodeptr, wtn, crc1, _, err := dpfs.WriteFile(fs, rdp, fn, meta, false)
 	duration1 := time.Since(start)
 	if err != nil {
 		t.Errorf("test size:%d, write file failed :%s", totalSize, err)
 		return err
 	}
 
-	dc, err := core.NewNullDataConsumer(true)
+	dc, err := dpfs.NewNullDataConsumer(true)
 	if err != nil {
 		return err
 	}
 	start = time.Now()
-	rdn, crc2, _, err2 := core.ReadFile(fs, inodeptr, dc, int64(batchLimit), false)
+	rdn, crc2, _, err2 := dpfs.ReadFile(fs, inodeptr, dc, int64(batchLimit), false)
 	duration2 := time.Since(start)
 	if err2 != nil {
 		t.Errorf("test size:%d,read file failed :%s", totalSize, err2)
@@ -112,7 +112,7 @@ func TestRW(t *testing.T) {
 	defer os.RemoveAll(testDir)
 
 	var group uint32 = 32
-	fs, err := core.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
+	fs, err := dpfs.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
 	if err != nil {
 		t.Fatalf("Failed to create file system: %v", err)
 	}

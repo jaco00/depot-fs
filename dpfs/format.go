@@ -1,5 +1,5 @@
 /*
- misc.go
+ fmt.go
 
  GNU GENERAL PUBLIC LICENSE
  Version 3, 29 June 2007
@@ -18,14 +18,28 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core
+package dpfs
 
-func AddUnique(array *[]uint32, newElem uint32) {
-	v := *array
-	for i := len(v) - 1; i >= 0; i-- {
-		if v[i] == newElem {
-			return
-		}
+import "fmt"
+
+func FormatBytes(bytes int64) string {
+	const (
+		KB int64 = 1024
+		MB       = KB * 1024
+		GB       = MB * 1024
+		TB       = GB * 1024
+	)
+
+	switch {
+	case bytes >= TB:
+		return fmt.Sprintf("%.2f TB", float64(bytes)/float64(TB))
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
+	case bytes >= KB:
+		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
+	default:
+		return fmt.Sprintf("%d", bytes)
 	}
-	*array = append(v, newElem)
 }

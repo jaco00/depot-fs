@@ -1,7 +1,5 @@
-//go:build full
-
 /*
- bigfile_test.go
+ ent.go
 
  GNU GENERAL PUBLIC LICENSE
  Version 3, 29 June 2007
@@ -20,31 +18,27 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core_test
+package dpfs
 
-import (
-	"depotFS/core"
-	"fmt"
-	"os"
-	"testing"
-)
+type EntAddr uint32
 
-func TestBigFile(t *testing.T) {
-	var batchSize int = 1024 * 1024
-	var fileSize int64 = 2 * 1024 * 1024 * 1024
+func (b EntAddr) IsBigBlock() uint32 {
+	return (uint32(b) & 0x80000000) >> 31
+}
 
-	if err := os.MkdirAll(testDir, 0755); err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+// return idx,group,isbig
+func (b EntAddr) GetAddr() (uint32, uint32, uint32) {
+	idx := uint32(b) & 0x000FFFFF
+	b = b >> 20
+	group := uint32(b & 0x7FF)
+	return idx, group, uint32(b >> 11)
+	//return (uint32(b) & 0x80000000) >> 31, (uint32(b) & 0x7FF00000) >> 20, pos
+}
+
+func MakeEntAddr(idx, group uint32, isBigBlock bool) uint32 {
+	addr := group<<20 | idx
+	if isBigBlock {
+		addr = addr | 0x80000000
 	}
-	defer os.RemoveAll(testDir)
-	var group uint32 = 32
-	fs, err := core.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
-	if err != nil {
-		t.Fatalf("Failed to create file system: %v", err)
-	}
-	fmt.Printf("Runing big file testing...\n")
-	if err := doRW(t, fs, fileSize, batchSize); err != nil {
-		t.Errorf("Failed on big file test: %v", err)
-	}
-	return
+	return addr
 }

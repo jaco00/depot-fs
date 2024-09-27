@@ -1,5 +1,7 @@
+//go:build full
+
 /*
- file_key.go
+ bigfile_test.go
 
  GNU GENERAL PUBLIC LICENSE
  Version 3, 29 June 2007
@@ -18,40 +20,32 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/> */
 
-package core
+package dpfs_test
 
 import (
-	"encoding/binary"
-	"encoding/hex"
-	"errors"
 	"fmt"
+	"os"
+	"testing"
+
+	"github.com/jaco00/depot-fs/dpfs"
 )
 
-type FileKey struct {
-	Shard    uint16
-	Inodeptr uint32
-	Seq      uint32
-	Stamp    uint32
-}
+func TestBigFile(t *testing.T) {
+	var batchSize int = 1024 * 1024
+	var fileSize int64 = 2 * 1024 * 1024 * 1024
 
-const keyLength = 28
-
-func (k *FileKey) ToString() string {
-	return fmt.Sprintf("%04x%08x%08x%08x", k.Shard, k.Inodeptr, k.Seq, k.Stamp)
-}
-
-func (k *FileKey) ParseKey(key string) error {
-	if len(key) != 28 {
-		return errors.New("invalid key length")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	bytes, err := hex.DecodeString(string(key))
+	defer os.RemoveAll(testDir)
+	var group uint32 = 32
+	fs, err := dpfs.MakeFileSystem(group, 2*256*1024, testDir, "", "", 0, true)
 	if err != nil {
-		return err
+		t.Fatalf("Failed to create file system: %v", err)
 	}
-	k.Shard = binary.BigEndian.Uint16(bytes[:2])
-	k.Inodeptr = binary.BigEndian.Uint32(bytes[2:6])
-	k.Seq = binary.BigEndian.Uint32(bytes[6:10])
-	k.Stamp = binary.BigEndian.Uint32(bytes[10:14])
-
-	return nil
+	fmt.Printf("Runing big file testing...\n")
+	if err := doRW(t, fs, fileSize, batchSize); err != nil {
+		t.Errorf("Failed on big file test: %v", err)
+	}
+	return
 }

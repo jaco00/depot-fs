@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jaco00/depot-fs/core"
+	"github.com/jaco00/depot-fs/dpfs"
 
 	"github.com/sirupsen/logrus"
 )
@@ -28,7 +28,7 @@ var (
 	showGraph     = flag.Bool("g", false, "Show block bitmap graph")
 	verboseLog    = flag.Bool("v", false, "Use verbose logging for developer")
 	help          = flag.Bool("h", false, "Display this help message")
-	fs            *core.FileSystem
+	fs            *dpfs.FileSystem
 )
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 	}
 	var group uint32 = 32
 	var err error
-	fs, err = core.MakeFileSystem(group, 0, *dataDir, "", "", 1, true)
+	fs, err = dpfs.MakeFileSystem(group, 0, *dataDir, "", "", 1, true)
 	if err != nil {
 		logrus.Errorf("Init file system failed:%s", err)
 		return
@@ -72,16 +72,16 @@ func main() {
 		fmt.Printf("Delete file: %s [%v]\n", *delFile, err)
 	} else if *readFile != "" {
 		var batchLimit int64 = 10 * 1024 * 1024
-		dc, err := core.NewNullDataConsumer(false)
+		dc, err := dpfs.NewNullDataConsumer(false)
 		if err != nil {
 			return
 		}
-		rdn, _, _, err := core.ReadFile(fs, *readFile, dc, int64(batchLimit), true)
+		rdn, _, _, err := dpfs.ReadFile(fs, *readFile, dc, int64(batchLimit), true)
 		if err != nil {
 			fmt.Printf("Read file failed :%s\n", err)
 			return
 		}
-		fmt.Printf("Read %s bytes\n", core.FormatBytes(rdn))
+		fmt.Printf("Read %s bytes\n", dpfs.FormatBytes(rdn))
 	} else if *fromDir != "" {
 		list, err := scanDir(*fromDir)
 		if err != nil {
@@ -143,16 +143,16 @@ func printHelpInfo() {
 }
 
 type FileCrc struct {
-	snap core.FileSnap
+	snap dpfs.FileSnap
 	crc  uint32
 }
 
-func printFileList(list []core.FileSnap) {
+func printFileList(list []dpfs.FileSnap) {
 	for _, v := range list {
 		fmt.Printf("%-8x %-30s %-10s %-25s %s\n",
 			v.Inode,
 			v.Key,
-			core.FormatBytes(v.Size),
+			dpfs.FormatBytes(v.Size),
 			time.Unix(int64(v.CTime), 0).Local().Format("2006-01-02 15:04:05 MST"),
 			v.Name,
 		)
@@ -166,7 +166,7 @@ func printInfo() {
 	fmt.Printf("Total group:%d\n", fs.Smeta.TotalGroups)
 	fmt.Printf("Total space:%d GB\n", fs.Smeta.TotalSpace()/(1024*1024*1024))
 	fmt.Printf("Block size:%d\n", fs.Smeta.BlockSize)
-	fmt.Printf("Inode size:%d\n", binary.Size(core.Inode{}))
+	fmt.Printf("Inode size:%d\n", binary.Size(dpfs.Inode{}))
 	fmt.Printf("Blocks [%9d/%-9d]\n", tb-fb, tb)
 	fmt.Printf("Inodes [%9d/%-9d]\n", ti-fi, ti)
 	fmt.Printf("\n== GROUP INFO ==\n")
@@ -183,7 +183,7 @@ func printInfo() {
 			v.Fn,
 			fmt.Sprintf("%d/%d", ti-fi, ti),
 			fmt.Sprintf("%d/%d", tb-fb, tb),
-			core.FormatBytes(v.GetSize()))
+			dpfs.FormatBytes(v.GetSize()))
 	}
 }
 
@@ -192,11 +192,11 @@ func saveFile(path, name string) (FileCrc, error) {
 	info := FileCrc{}
 	info.snap.Name = name
 
-	fdp, err := core.NewFileDataProvider(src, 1024*1024, true)
+	fdp, err := dpfs.NewFileDataProvider(src, 1024*1024, true)
 	if err != nil {
 		return info, err
 	}
-	key, _, crc1, _, err := core.WriteFile(fs, fdp, name, nil, true)
+	key, _, crc1, _, err := dpfs.WriteFile(fs, fdp, name, nil, true)
 	info.crc = crc1
 	info.snap.Key = key
 	return info, nil
@@ -204,12 +204,12 @@ func saveFile(path, name string) (FileCrc, error) {
 
 func saveFiles(list []FileCrc, dst string, crcCheck bool) error {
 	for _, e := range list {
-		fdc, err := core.NewFileDataConsumer(dst, e.snap.Name, crcCheck)
+		fdc, err := dpfs.NewFileDataConsumer(dst, e.snap.Name, crcCheck)
 		if err != nil {
 			fmt.Printf("New file data consumer failed:%s\n", err)
 			return err
 		}
-		_, crc, _, err := core.ReadFile(fs, e.snap.Key, fdc, 1024*1024, true)
+		_, crc, _, err := dpfs.ReadFile(fs, e.snap.Key, fdc, 1024*1024, true)
 		if err != nil {
 			fmt.Printf("Load file data failed:%s\n", err)
 			return err
@@ -247,7 +247,7 @@ func scanDir(src string) ([]FileCrc, error) {
 	return infos, nil
 }
 
-func batchAddFiles(fs *core.FileSystem, n int) error {
+func batchAddFiles(fs *dpfs.FileSystem, n int) error {
 	sizeLimit := 50 * 1024
 	data := make([]byte, sizeLimit)
 	for i := 0; i < n; i++ {
@@ -266,15 +266,15 @@ func batchAddFiles(fs *core.FileSystem, n int) error {
 	return nil
 }
 
-func testingLargeFile(fs *core.FileSystem, size int64) error {
+func testingLargeFile(fs *dpfs.FileSystem, size int64) error {
 	var batchLimit int64 = 50 * 1024 * 1024
 	var totalSize int64 = size * 1024 * 1024
-	rdp, err := core.NewRandomDataProvider(int64(batchLimit), int64(totalSize), false, true)
+	rdp, err := dpfs.NewRandomDataProvider(int64(batchLimit), int64(totalSize), false, true)
 	if err != nil {
 		return err
 	}
 
-	key, wtn, crc1, vf, err := core.WriteFile(fs, rdp, "test.file", nil, true)
+	key, wtn, crc1, vf, err := dpfs.WriteFile(fs, rdp, "test.file", nil, true)
 	if err != nil {
 		fmt.Printf("test size:%d, write file failed :%s\n", totalSize, err)
 		return err
@@ -286,11 +286,11 @@ func testingLargeFile(fs *core.FileSystem, size int64) error {
 	}
 	fmt.Printf("sync cost %s\n", time.Since(n))
 
-	dc, err := core.NewNullDataConsumer(true)
+	dc, err := dpfs.NewNullDataConsumer(true)
 	if err != nil {
 		return err
 	}
-	rdn, crc2, _, err2 := core.ReadFile(fs, key, dc, int64(batchLimit), true)
+	rdn, crc2, _, err2 := dpfs.ReadFile(fs, key, dc, int64(batchLimit), true)
 	if err2 != nil {
 		fmt.Printf("test size:%d,read file failed :%s\n", totalSize, err2)
 		return err
