@@ -32,7 +32,15 @@ Run the unit tests using:
 go test ./...
 ```
 
-## API Reference
+## How to Run the Demo
+```bash
+cd depot-fs
+./depotFS -h
+```
+Use the -h flag to see the available options
+This will display all available commands and options for running the demo, such as creating files, deleting files, or running performance tests.
+
+## Primary API Reference
 
 ### `MakeFileSystem`
 ```go
@@ -40,11 +48,9 @@ func MakeFileSystem(groupNum, blocksInGroup uint32,
         root, pattern, tpl string, shardId uint16, enableBigAlloc bool) (*FileSystem, error)
  ```
 #### Description
-
-The `MakeFileSystem` function initializes and creates a new file system instance. It sets up the underlying structure based on the specified parameters, allowing for efficient file management and storage operations.
+The `MakeFileSystem` function initializes and creates a new file system instance. It sets up the underlying structure based on the specified parameters, allowing for efficient file management and storage operations. The file system also provides a `Close` function to safely close all open data files and ensure any buffered data is written to disk, ensuring consistent and reliable operation.
 
 #### Parameters
-
 - **groupNum** (uint32): The number of data files in the file system. Suggested values are between 16 and 256
 - **blocksInGroup** (uint32): The number of blocks per allocation group. Use 0 for default value (1M).
 - **root** (string): The root directory for the data file.
@@ -112,7 +118,8 @@ The `Read` method reads data from an open Vfile into the provided byte slice. It
 func (vf *Vfile) Write(data []byte) (int, error) {
 ```
 #### Description
-The Write method writes the provided byte slice to the open Vfile. It writes as many bytes as are available in the slice and returns the number of bytes written. This function can be used to append or overwrite data in the file.
+The `Write` method writes the provided byte slice to the open Vfile. It writes as many bytes as are available in the slice and returns the number of bytes written. This function can be used to append or overwrite data in the file. The depot file system operates without the traditional concept of closing files. Instead, files remain open and accessible throughout their lifecycle, allowing for continuous read and write operations. Data integrity is maintained through methods like `Sync`, which ensure that any buffered data is written to disk.
+
 #### Parameters
 - **data** ([]byte): The byte slice containing the data to be written to the file.
 #### Returns

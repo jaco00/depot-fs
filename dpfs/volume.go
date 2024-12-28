@@ -21,6 +21,7 @@
 package dpfs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -50,7 +51,7 @@ func align(value, alignment int64) int64 {
 	return (value + (alignment - 1)) & ^(alignment - 1)
 }
 
-// smeta+gmeta+inodeBitmap+blockBitmap+inode+blocks
+// smeta+globalMeta+gmeta+inodeBitmap+blockBitmap+inode+blocks
 type Volume struct {
 	Status int
 	Id     int
@@ -71,10 +72,11 @@ func (v *Volume) GetSize() int64 {
 }
 
 type VolumeFiles struct {
-	root    string
-	pattern string
-	tpl     string
-	smeta   SuperBlock
+	root       string
+	pattern    string
+	tpl        string
+	smeta      SuperBlock
+	globalData *GlobalMeta
 	//vols    int
 	volumes []Volume
 	groups  []BlockGroup
@@ -104,7 +106,43 @@ func (v *VolumeFiles) FindLastVolumeIdx() uint32 {
 	return idx
 }
 
-func (v *VolumeFiles) loadMeta(files []string) error {
+func (v *VolumeFiles) SetGlobalData(ver uint32, data []byte) error {
+	gd, err := NewGlobalMeta(ver, data)
+	if err != nil {
+		return err
+	}
+	v.globalData = gd
+	if v.checkReady(0, &v.groups[0]) != nil {
+		return err
+	}
+	for i := 0; i < MaxGlobalMetaDup; i++ {
+		if i >= len(v.volumes) {
+			break
+		}
+		if v.volumes[i].Status > 0 {
+			if err := v.checkReady(uint32(i), &v.groups[i]); err != nil {
+				return err
+			}
+			buf := new(bytes.Buffer)
+			err = binary.Write(buf, binary.LittleEndian, gd)
+			_, err := v.volumes[i].file.WriteAt(buf.Bytes(), int64(binary.Size(SuperBlock{})))
+			if err != nil {
+				return err
+			}
+
+		}
+	}
+	return nil
+}
+
+func (v *VolumeFiles) GetGlobalData() (uint32, []byte, error) {
+	if v.globalData == nil {
+		return 0, nil, nil
+	}
+	return v.globalData.ExtractData()
+}
+
+func (v *VolumeFiles) loadSuperMeta(files []string) error {
 	if len(files) == 0 {
 		return nil //use setup values
 	}
@@ -123,6 +161,7 @@ func (v *VolumeFiles) loadMeta(files []string) error {
 			file.Close()
 		} else {
 			v.smeta = smeta
+			file.Close()
 			return nil
 		}
 	}
@@ -130,7 +169,7 @@ func (v *VolumeFiles) loadMeta(files []string) error {
 }
 
 func (v *VolumeFiles) initParas() {
-	InodeBitmapOffset = int64(binary.Size(SuperBlock{}) + binary.Size(BlockGroupDescriptor{}))
+	InodeBitmapOffset = int64(binary.Size(SuperBlock{}) + binary.Size(GlobalMeta{}) + binary.Size(BlockGroupDescriptor{}))
 	//BlockBitmapOffset = InodeBitmapOffset + int64(len(v.groups[0].inodeBitmap))
 	v.smeta.TotalInodes()
 	BlockBitmapOffset = InodeBitmapOffset + int64(v.smeta.BlocksInGroup/v.smeta.InodesRatio)/8
@@ -182,15 +221,15 @@ func (v *VolumeFiles) scanFiles() (int, error) {
 		}
 	}
 
-	if err := v.loadMeta(gfs); err != nil {
+	if err := v.loadSuperMeta(gfs); err != nil {
 		return 0, err
 	}
 	v.initGroups()
 	v.initParas()
 
 	start := time.Now()
-	for _, file := range gfs {
-		if err := v.initVolume(file); err != nil {
+	for idx, file := range gfs {
+		if err := v.initVolume(idx, file); err != nil {
 			return 0, err
 		}
 	}
@@ -199,7 +238,7 @@ func (v *VolumeFiles) scanFiles() (int, error) {
 	return len(gfs), nil
 }
 
-func (v *VolumeFiles) initVolume(fn string) error {
+func (v *VolumeFiles) initVolume(idx int, fn string) error {
 	//vv := &v.volumes[idx]
 	file, err := os.OpenFile(fn, os.O_RDWR, 0644)
 	if err != nil {
@@ -211,7 +250,21 @@ func (v *VolumeFiles) initVolume(fn string) error {
 	}
 	if smeta.Crc != v.smeta.Crc {
 		logrus.Errorf("Bad super block in file :%s", fn)
-		return errors.New("Bad super block found")
+		//return errors.New("Bad super block found")
+	}
+	globalMeta := GlobalMeta{}
+	if err := binary.Read(file, binary.LittleEndian, &globalMeta); err != nil {
+		file.Close()
+		return err
+	}
+	if idx < MaxGlobalMetaDup {
+		if _, _, err := globalMeta.ExtractData(); err != nil {
+			logrus.Errorf("Load global meta data failed @ %s", fn)
+		} else {
+			if v.globalData == nil {
+				v.globalData = &globalMeta
+			}
+		}
 	}
 
 	meta := BlockGroupDescriptor{}
@@ -253,13 +306,23 @@ func (v *VolumeFiles) checkReady(idx uint32, g *BlockGroup) error { //todo fix
 	var err error
 	if vv.Status == 0 {
 		//init file
-		vv.file, err = os.Create(filepath.Join(v.root, vv.Fn))
+		vv.file, err = os.OpenFile(filepath.Join(v.root, vv.Fn), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
 		if err != nil {
 			return err
 		}
 		v.smeta.Sign()
 		if err := binary.Write(vv.file, binary.LittleEndian, v.smeta); err != nil {
 			return err
+		}
+		if v.globalData != nil {
+			if err := binary.Write(vv.file, binary.LittleEndian, v.globalData); err != nil {
+				return err
+			}
+		} else {
+			d, _ := NewGlobalMeta(0, nil)
+			if err := binary.Write(vv.file, binary.LittleEndian, d); err != nil {
+				return err
+			}
 		}
 		if err := binary.Write(vv.file, binary.LittleEndian, g.gmeta); err != nil {
 			return err
@@ -286,7 +349,7 @@ func (v *VolumeFiles) checkReady(idx uint32, g *BlockGroup) error { //todo fix
 		}
 	} else {
 		if vv.file == nil {
-			vv.file, err = os.Open(filepath.Join(v.root, vv.Fn))
+			vv.file, err = os.OpenFile(filepath.Join(v.root, vv.Fn), os.O_RDWR, 0666)
 			if err != nil {
 				return err
 			}

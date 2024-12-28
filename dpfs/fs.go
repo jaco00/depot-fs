@@ -212,6 +212,7 @@ func (i *Inode) DataSize() uint64 {
 //   - enableBigAlloc (bool): A flag indicating whether to enable large
 //     allocation for improved performance.
 //
+//
 // Returns:
 //   - *FileSystem: A pointer to the newly created FileSystem instance.
 //   - error: An error if the creation fails. If successful, the file system
@@ -273,10 +274,39 @@ func (f *FileSystem) Close() error {
 			}
 			v.file.Close()
 			v.file = nil
-			v.Status = 0
 		}
 	}
 	return err
+}
+
+// SetGlobalData provides an accessible storage space for the business layer to keep
+// essential global settings
+//
+// Parameters:
+//   - ver (uint32): Represents the version number of the global data, allowing
+//     the system to handle versioned configurations if needed.
+//   - data ([]byte): A byte slice containing global configuration data, such as
+//     encryption parameters, system-wide keys, or other shared settings
+//     accessible by the business layer.
+//
+// Returns:
+//   - error: Returns nil if the function completes successfully, otherwise it
+//     returns an error indicating issues with setting global data.
+
+func (f *FileSystem) SetGlobalData(ver uint32, data []byte) error {
+	return f.device.SetGlobalData(ver, data)
+}
+
+// GetGlobalData retrieves the current global configuration data and its version.
+//
+// Returns:
+//   - uint32: The version of the global configuration data, useful for
+//     managing different data versions and ensuring compatibility.
+//   - []byte: A byte slice containing the global configuration data
+//   - error: Returns nil if data is successfully retrieved; otherwise, returns
+//     an error indicating the issue with fetching global data.
+func (f *FileSystem) GetGlobalData() (uint32, []byte, error) {
+	return f.device.GetGlobalData()
 }
 
 func (f *FileSystem) GetVolumeInfo(idx int) *Volume {
@@ -328,6 +358,9 @@ func (fs *FileSystem) freeInode(inodeptr uint32) error {
 	bg := &fs.blockGroups[group-1]
 	bg.inodeBitmap.ClearBits([]uint32{inodeptr})
 	data := bg.inodeBitmap.GetData(int(idx/8), 1)
+	if err := fs.device.checkReady(group-1, &fs.blockGroups[group-1]); err != nil {
+		return err
+	}
 	_, err := fs.device.volumes[group-1].file.WriteAt(data, int64(idx/8)+InodeBitmapOffset)
 	return err
 }
@@ -340,8 +373,11 @@ func (fs *FileSystem) allocInode() (uint32, error) {
 			if len(lst) > 0 {
 				idx, _, _ := EntAddr(lst[0]).GetAddr()
 				data := fs.blockGroups[cur].inodeBitmap.GetData(int(idx/8), 1)
-				fs.device.volumes[cur].file.WriteAt(data, int64(idx/8)+InodeBitmapOffset)
-				return lst[0], nil
+				if err := fs.device.checkReady(cur, &fs.blockGroups[cur]); err != nil {
+					return 0, err
+				}
+				_, err := fs.device.volumes[cur].file.WriteAt(data, int64(idx/8)+InodeBitmapOffset)
+				return lst[0], err
 			}
 		}
 		cur = (cur + 1) % fs.Smeta.TotalGroups
@@ -490,6 +526,9 @@ func (fs *FileSystem) allocBlocks(numBlocks int, hlimit int, bigAlloc bool) ([]u
 
 func (fs *FileSystem) readBlock(blkptr uint32, offset int, data []byte) (int, int, error) {
 	idx, group, isBig := EntAddr(blkptr).GetAddr()
+	if group < 1 || group > fs.Smeta.TotalGroups {
+		return 0, 0, BAD_GID
+	}
 	blksize := int(fs.Smeta.BlockSize)
 	if isBig > 0 {
 		blksize = 64 * int(fs.Smeta.BlockSize)
@@ -592,6 +631,9 @@ func (fs *FileSystem) writeBlock(blkptr uint32, data []byte, offset int) (int, i
 		size = len(data)
 		broff = offset + size
 	}
+	if err := fs.device.checkReady(group-1, &fs.blockGroups[group-1]); err != nil {
+		return 0, 0, err
+	}
 	pos := BlockOffset + int64(offset) + int64(idx)*int64(fs.Smeta.BlockSize)
 	if _, err := fs.device.volumes[group-1].file.Seek(pos, io.SeekStart); err != nil {
 		logrus.Errorf("read block failed(bad offset): %s", err)
@@ -637,8 +679,9 @@ func (fs *FileSystem) calcOffset(dataSize uint64, inodeptr uint32) int {
 	}
 }
 
-func (fs *FileSystem) GetFileList() ([]FileSnap, error) {
+func (fs *FileSystem) GetFileList(progress chan<- int) ([]FileSnap, error) {
 	var list []FileSnap
+	cnt := 0
 	for g := 0; g < int(fs.Smeta.TotalGroups); g++ {
 		if fs.device.volumes[g].Status > 0 {
 			gp := &fs.blockGroups[g]
@@ -655,10 +698,18 @@ func (fs *FileSystem) GetFileList() ([]FileSnap, error) {
 							return list, err
 						}
 						list = append(list, snap)
+						cnt++
+						if progress != nil && cnt%1000 == 0 {
+							progress <- cnt
+						}
 					}
 				}
 			}
 		}
+	}
+	if progress != nil {
+		progress <- cnt
+		close(progress)
 	}
 	return list, nil
 }
@@ -883,12 +934,12 @@ func (fs *FileSystem) CreateFile(name string, meta []byte) (*Vfile, string, erro
 
 	inodeptr, err := fs.allocInode()
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("Alloc Inode Failed:%s", err)
 	}
 	vf.Inodeptr = inodeptr
 	oldnode, err := fs.readInode(inodeptr)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("Read Inode Failed:%s", err)
 	}
 	inode := Inode{
 		Seq:   oldnode.Seq + 1,
@@ -901,10 +952,10 @@ func (fs *FileSystem) CreateFile(name string, meta []byte) (*Vfile, string, erro
 	inode.Blocks = 1
 	blks, _, err := fs.allocBlocks(1, 1, false)
 	if err != nil {
-		return nil, uid, err
+		return nil, uid, fmt.Errorf("Alloc Blocks Failed:%s", err)
 	}
 	if _, _, err := fs.writeBlock(blks[0], mbuff, 0); err != nil {
-		return nil, uid, err
+		return nil, uid, fmt.Errorf("Write Block Failed:%s", err)
 	}
 	inode.DirectPointers[0] = blks[0]
 	vf.Inode = &inode
@@ -917,6 +968,9 @@ func (fs *FileSystem) CreateFile(name string, meta []byte) (*Vfile, string, erro
 
 func (fs *FileSystem) loadMeta(node *Inode) (FileMeta, error) {
 	meta := FileMeta{}
+	if node.DirectPointers[0] == 0 {
+		return meta, errors.New("Empty Inode")
+	}
 	data := make([]byte, node.MetaSize)
 	if _, _, err := fs.readBlock(node.DirectPointers[0], 0, data); err != nil {
 		return meta, err
@@ -945,6 +999,9 @@ func (fs *FileSystem) OpenFile(uid string) (*Vfile, error) {
 	vf := Vfile{
 		fs:   fs,
 		Meta: new(FileMeta),
+	}
+	if !fs.isValidInode(key.Inodeptr) {
+		return nil, FNF
 	}
 
 	inode, err := fs.readInode(key.Inodeptr)

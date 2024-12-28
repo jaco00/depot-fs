@@ -25,7 +25,9 @@ var (
 	showInfo      = flag.Bool("I", false, "Show all info")
 	batchAddFile  = flag.Int("b", 0, "Batch add a specified number of small files for testing")
 	listFile      = flag.Bool("l", false, "Show all files")
-	showGraph     = flag.Bool("g", false, "Show block bitmap graph")
+	showGraph     = flag.Bool("G", false, "Show block bitmap graph")
+	setGlobalData = flag.String("s", "", "Set global data")
+	getGlobalData = flag.Bool("g", false, "Get global data")
 	verboseLog    = flag.Bool("v", false, "Use verbose logging for developer")
 	help          = flag.Bool("h", false, "Display this help message")
 	fs            *dpfs.FileSystem
@@ -56,7 +58,7 @@ func main() {
 	}
 	start := time.Now()
 	if *eraseAll {
-		snap, err := fs.GetFileList()
+		snap, err := fs.GetFileList(nil)
 		if err != nil {
 			logrus.Errorf("Load file list failed:%s", err)
 			return
@@ -67,6 +69,18 @@ func main() {
 				return
 			}
 		}
+	} else if *setGlobalData != "" {
+		if err := fs.SetGlobalData(60, []byte(*setGlobalData)); err != nil {
+			logrus.Errorf("Set global data failed:%s", err)
+		}
+		return
+	} else if *getGlobalData {
+		if ver, data, err := fs.GetGlobalData(); err != nil {
+			logrus.Errorf("Get global data failed:%s", err)
+		} else {
+			fmt.Printf("Global data [ver:%d,value:%s]\n", ver, string(data))
+		}
+		return
 	} else if *delFile != "" {
 		err := fs.DeleteFile(*delFile)
 		fmt.Printf("Delete file: %s [%v]\n", *delFile, err)
@@ -97,7 +111,7 @@ func main() {
 		}
 	} else if *toDir != "" {
 		fmt.Printf("############################save data###############################\n")
-		snap, err := fs.GetFileList()
+		snap, err := fs.GetFileList(nil)
 		if err != nil {
 			logrus.Errorf("Load file list failed:%s", err)
 			return
@@ -119,7 +133,7 @@ func main() {
 		batchAddFiles(fs, *batchAddFile)
 	} else if *listFile {
 		fmt.Printf("== FILE LIST ==\n")
-		snap, err := fs.GetFileList()
+		snap, err := fs.GetFileList(nil)
 		if err != nil {
 			logrus.Errorf("Load file list failed:%s", err)
 			return
