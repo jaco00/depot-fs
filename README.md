@@ -40,6 +40,14 @@ cd depot-fs
 Use the -h flag to see the available options
 This will display all available commands and options for running the demo, such as creating files, deleting files, or running performance tests.
 
+## depot-fs-cli: A CLI Tool for Testing depot-fs
+
+[**depot-fs-cli**](https://github.com/jaco00/depot-fs-cli) is a command-line tool designed to test and interact with the **depot-fs** file system. It provides essential commands to manage, encrypt, decrypt, and manipulate files within depot-fs, making it easier to validate and benchmark its functionality.
+
+### Key Features
+- **Shell-like File Management** – Execute commands to manage files and directories within depot-fs, just like a Unix shell.
+- Copy, move, and search for files efficiently.
+  
 ## Primary API Reference
 
 ### `MakeFileSystem`
